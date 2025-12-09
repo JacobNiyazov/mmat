@@ -1,0 +1,253 @@
+\documentclass[11pt,twocolumn]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{float}
+\usepackage{caption}
+
+\title{\textbf{Machine Learning Estimation of Time-Varying Price Impact: Extending the Cont-Kukanov-Stoikov Model with Random Forest}}
+
+\author{
+Jacob Niyazov\textsuperscript{1} \and
+Author Two\textsuperscript{1} \and
+Author Three\textsuperscript{1} \and
+Author Four\textsuperscript{1} \and
+Author Five\textsuperscript{1} \\[0.5em]
+\textsuperscript{1}Tepper School of Business, Carnegie Mellon University
+}
+
+\date{December 2024}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a machine learning approach to estimating time-varying price impact coefficients in equity markets. Building upon the foundational work of Cont, Kukanov, and Stoikov (2012), we develop a Random Forest regression model that incorporates multiple market microstructure features to predict the price impact coefficient $\beta$. Using NYSE TAQ Level 1 data for six large-cap equities, we demonstrate that our approach achieves an out-of-sample $R^2$ of 0.8549, substantially outperforming the baseline model ($R^2 = 0.1368$). Our analysis reveals that bid-ask spread is the dominant predictor of price impact, accounting for over 85\% of feature importance. These findings have practical implications for optimal execution strategies and transaction cost estimation.
+\end{abstract}
+
+\section{Introduction}
+
+Understanding price impact is fundamental to market microstructure and algorithmic trading. When a trader submits an order, the resulting price movement depends on various market conditions including liquidity, volatility, and order flow dynamics. Accurate estimation of price impact is critical for optimal execution algorithms that seek to minimize transaction costs.
+
+The seminal work by Kyle (1985) introduced the concept of price impact through the model:
+\begin{equation}
+\Delta P = \mu + \lambda x + \varepsilon
+\end{equation}
+where $\Delta P$ is the price change, $x$ is the order flow, $\lambda$ is the price impact coefficient, and $\varepsilon$ is noise. This foundational framework established that prices move linearly with order flow, with the slope $\lambda$ capturing market depth.
+
+Cont, Kukanov, and Stoikov (2012) extended this framework by introducing the Order Flow Imbalance (OFI) measure and demonstrating that price changes are contemporaneously related to OFI. Their model estimates price impact as:
+\begin{equation}
+\beta = \frac{c}{\text{AD}^{\lambda}}
+\end{equation}
+where AD is the average market depth and $c$, $\lambda$ are estimated parameters. However, this model assumes a static relationship between depth and price impact.
+
+In this paper, we extend the Cont et al. framework by developing a Random Forest model that captures the time-varying nature of price impact. Our key contributions are:
+\begin{enumerate}
+    \item We implement efficient feature extraction using kdb/Q for high-frequency NYSE TAQ data
+    \item We demonstrate that machine learning can substantially improve price impact prediction
+    \item We identify the most important market microstructure features for price impact estimation
+\end{enumerate}
+
+\section{Literature Review}
+
+The study of price impact has evolved significantly since Kyle's (1985) theoretical framework. Hasbrouck (1991) developed the VAR approach to measuring price impact, while Glosten and Harris (1988) decomposed the bid-ask spread into adverse selection and inventory components.
+
+Cont, Kukanov, and Stoikov (2012) introduced the Order Flow Imbalance (OFI) measure, which aggregates the changes in best bid and ask quantities to capture buying and selling pressure. They showed that OFI has strong contemporaneous correlation with price changes and that the price impact coefficient varies with market depth.
+
+More recently, machine learning approaches have been applied to market microstructure problems. Sirignano and Cont (2019) used deep learning for limit order book modeling, while Kolm, Turiel, and Westray (2023) surveyed machine learning applications in market microstructure. However, relatively few studies have applied machine learning specifically to price impact estimation.
+
+Our work bridges this gap by combining the theoretical foundation of Cont et al. (2012) with modern machine learning techniques. We use Random Forest regression, which offers interpretability through feature importance analysis while capturing nonlinear relationships in the data.
+
+\section{Data and Methodology}
+
+\subsection{Data}
+
+We use NYSE TAQ Level 1 NBBO (National Best Bid and Offer) data accessed through a kdb+ database. Our sample consists of six large-cap U.S. equities: AAPL, MSFT, AMZN, GOOG, META, and TSLA. We analyze data from February 3, 2020, focusing on regular trading hours (10:00 AM to 3:30 PM EST).
+
+The data is aggregated into 10-second buckets, yielding 1,310 raw observations. After applying filters for valid OFI calculations and removing outliers (beyond 3 standard deviations), our final modeling dataset contains 1,270 observations.
+
+\subsection{Feature Engineering with kdb/Q}
+
+We leverage kdb/Q for efficient feature computation on the high-frequency data. The Order Flow Imbalance is computed following Cont et al. (2012):
+\begin{equation}
+\text{OFI}_t = \sum_{i} e_i
+\end{equation}
+where $e_i$ captures the contribution of each quote update to buying or selling pressure based on changes in best bid/ask prices and quantities.
+
+Our feature set includes:
+\begin{itemize}
+    \item \textbf{Lagged OFI}: Previous period's order flow imbalance
+    \item \textbf{Lagged Depth}: Average depth at best bid and ask
+    \item \textbf{Lagged Spread}: Bid-ask spread in dollars
+    \item \textbf{Relative Spread}: Spread as percentage of mid price
+    \item \textbf{Depth Imbalance}: $(D_{bid} - D_{ask})/(D_{bid} + D_{ask})$
+    \item \textbf{Parkinson Volatility}: $\sqrt{\frac{1}{4\ln 2}\ln^2(H/L)}$
+    \item \textbf{Rolling Means}: 5-period rolling averages of OFI, volatility, and depth
+    \item \textbf{Quote Frequency}: Number of NBBO updates per bucket
+\end{itemize}
+
+All features use lagged values to avoid look-ahead bias in prediction.
+
+\subsection{Baseline Model}
+
+We implement the Cont et al. (2012) model as our baseline. The price impact coefficient is estimated via log-linear regression:
+\begin{equation}
+\log(\beta) = \log(c) - \lambda \cdot \log(\text{AD})
+\end{equation}
+
+Our estimated parameters are $c = 0.7973$ and $\lambda = 1.4266$, yielding the model:
+\begin{equation}
+\hat{\beta} = \frac{0.7973}{\text{AD}^{1.4266}}
+\end{equation}
+
+\subsection{Random Forest Model}
+
+We train a Random Forest regressor with the following specifications:
+\begin{itemize}
+    \item Time-series cross-validation with 5 folds
+    \item Hyperparameter grid: n\_estimators $\in \{50, 100\}$, max\_depth $\in \{5, 10\}$, min\_samples\_leaf $\in \{5, 10\}$
+    \item Feature standardization via StandardScaler
+    \item 70/30 train-test split (time-ordered)
+\end{itemize}
+
+The optimal hyperparameters selected via cross-validation are: n\_estimators = 50, max\_depth = 10, min\_samples\_leaf = 10.
+
+\section{Results}
+
+\subsection{Model Performance}
+
+Table 1 presents the out-of-sample performance comparison between the baseline and Random Forest models.
+
+\begin{table}[H]
+\centering
+\caption{Model Performance Comparison (Out-of-Sample)}
+\begin{tabular}{lccc}
+\toprule
+Model & MSE & MAE & $R^2$ \\
+\midrule
+Baseline (Cont et al.) & 0.0758 & 0.0960 & 0.1368 \\
+Random Forest & 0.0127 & 0.0392 & 0.8549 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Random Forest model achieves a 525\% improvement in $R^2$ over the baseline. The mean squared error is reduced by 83\%, and the mean absolute error is reduced by 59\%. These results demonstrate that incorporating multiple market microstructure features significantly improves price impact prediction.
+
+\subsection{Feature Importance}
+
+Figure 1 displays the feature importance rankings from the Random Forest model.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{Figure1.png}
+\caption{Random Forest Feature Importance}
+\end{figure}
+
+The lagged bid-ask spread dominates with 85.5\% importance, followed by relative spread (5.1\%) and depth imbalance (2.9\%). This finding aligns with market microstructure theory: wider spreads indicate lower liquidity and higher adverse selection costs, leading to greater price impact.
+
+\subsection{Prediction Quality}
+
+Figure 2 compares predicted versus actual values for both models.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{Figure2.png}
+\caption{Predicted vs Actual Price Impact Coefficient}
+\end{figure}
+
+The baseline model (left panel) shows substantial scatter with predictions clustered around a narrow range, failing to capture the variation in actual $\beta$ values. The Random Forest model (right panel) demonstrates much tighter alignment with the 45-degree line, indicating accurate predictions across the full range of price impact values.
+
+\subsection{Time-Varying Dynamics}
+
+Figure 3 illustrates how the models track the time-varying price impact coefficient during the test period.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{Figure3.png}
+\caption{Time-Varying Price Impact (Test Period)}
+\end{figure}
+
+The Random Forest predictions (green dashed line) closely track the actual $\beta$ values (blue solid line), including the spikes in price impact that occur during periods of market stress. The baseline model (red dotted line) remains relatively flat and fails to capture this temporal variation.
+
+\subsection{Distribution Analysis}
+
+Figure 4 shows the distribution of predicted price impact coefficients.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{Figure4.png}
+\caption{Distribution of Predicted Price Impact}
+\end{figure}
+
+The Random Forest model produces a wider distribution of predictions that better matches the actual distribution of $\beta$ values, while the baseline model concentrates predictions in a narrow range.
+
+\section{Market Impact Implications}
+
+Our findings have direct implications for optimal execution. The expected price impact of an order of size $Q$ can be estimated as:
+\begin{equation}
+\text{Impact}(Q) = \hat{\beta} \cdot Q
+\end{equation}
+
+Using the Random Forest model to dynamically estimate $\hat{\beta}$ enables traders to:
+\begin{enumerate}
+    \item Schedule orders during periods of predicted low impact
+    \item Adjust execution urgency based on current market conditions
+    \item Estimate transaction costs more accurately for pre-trade analysis
+\end{enumerate}
+
+We conducted an execution timing analysis using a simple strategy: execute only when the Random Forest predicts low impact (bottom 25th percentile). This strategy yields an 82.8\% reduction in realized price impact compared to random timing.
+
+\section{Limitations and Future Work}
+
+Several limitations should be noted. First, our analysis focuses on a single trading day; extending to longer periods would improve robustness. Second, we analyze only large-cap equities; behavior may differ for less liquid securities. Third, our model assumes linear price impact within each time bucket.
+
+Future work could explore deep learning architectures for price impact prediction, incorporate Level 2 order book data, and develop real-time execution algorithms based on these predictions.
+
+\section{Conclusion}
+
+We have demonstrated that machine learning, specifically Random Forest regression, can substantially improve price impact estimation compared to traditional parametric models. By incorporating multiple market microstructure features computed efficiently with kdb/Q, our model achieves an out-of-sample $R^2$ of 0.8549, compared to 0.1368 for the baseline Cont et al. (2012) model.
+
+Our analysis reveals that the bid-ask spread is the dominant predictor of price impact, accounting for over 85\% of feature importance. This finding is consistent with microstructure theory: spread captures both liquidity and adverse selection, which are the primary drivers of price impact.
+
+The practical implications are significant. By accurately predicting time-varying price impact, traders can optimize their execution strategies to minimize transaction costs. Our execution timing analysis suggests potential cost reductions of over 80\% by conditioning trades on predicted low-impact periods.
+
+\bibliographystyle{plainnat}
+\begin{thebibliography}{10}
+
+\bibitem[Cont et al., 2012]{cont2012}
+Cont, R., Kukanov, A., \& Stoikov, S. (2012).
+\newblock The price impact of order book events.
+\newblock \textit{Journal of Financial Econometrics}, 12(1), 47-88.
+
+\bibitem[Glosten and Harris, 1988]{glosten1988}
+Glosten, L. R., \& Harris, L. E. (1988).
+\newblock Estimating the components of the bid/ask spread.
+\newblock \textit{Journal of Financial Economics}, 21(1), 123-142.
+
+\bibitem[Hasbrouck, 1991]{hasbrouck1991}
+Hasbrouck, J. (1991).
+\newblock Measuring the information content of stock trades.
+\newblock \textit{The Journal of Finance}, 46(1), 179-207.
+
+\bibitem[Kolm et al., 2023]{kolm2023}
+Kolm, P. N., Turiel, J., \& Westray, N. (2023).
+\newblock Deep order flow imbalance: Extracting alpha at multiple horizons from the limit order book.
+\newblock \textit{Mathematical Finance}, 33(4), 1044-1081.
+
+\bibitem[Kyle, 1985]{kyle1985}
+Kyle, A. S. (1985).
+\newblock Continuous auctions and insider trading.
+\newblock \textit{Econometrica}, 53(6), 1315-1335.
+
+\bibitem[Sirignano and Cont, 2019]{sirignano2019}
+Sirignano, J., \& Cont, R. (2019).
+\newblock Universal features of price formation in financial markets: perspectives from deep learning.
+\newblock \textit{Quantitative Finance}, 19(9), 1449-1459.
+
+\end{thebibliography}
+
+\end{document}
